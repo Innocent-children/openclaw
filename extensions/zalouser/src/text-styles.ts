@@ -106,7 +106,8 @@ export function parseZalouserTextStyles(input: string): { text: string; styles: 
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     let line = lines[lineIndex];
-    let baseIndent = 0;
+    let { text: unquotedLine, indent: baseIndent } = stripQuotePrefix(line);
+    line = unquotedLine;
 
     const fence = parseFenceMarker(line);
     if (fence) {
@@ -146,12 +147,6 @@ export function parseZalouserTextStyles(input: string): { text: string; styles: 
       }
       processedLines.push(headingMatch[2]);
       continue;
-    }
-
-    const quoteMatch = line.match(/^(>+)\s?(.*)$/);
-    if (quoteMatch) {
-      baseIndent = Math.min(5, quoteMatch[1].length);
-      line = quoteMatch[2];
     }
 
     const indentMatch = line.match(/^(\s+)(.*)$/);
@@ -295,11 +290,22 @@ function clampIndent(spaceCount: number): number {
 
 function hasClosingFence(lines: string[], startIndex: number, fence: FenceMarker): boolean {
   for (let index = startIndex; index < lines.length; index += 1) {
-    if (isClosingFence(lines[index], fence)) {
+    if (isClosingFence(stripQuotePrefix(lines[index]).text, fence)) {
       return true;
     }
   }
   return false;
+}
+
+function stripQuotePrefix(line: string): { text: string; indent: number } {
+  const match = line.match(/^(>+)\s?(.*)$/);
+  if (!match) {
+    return { text: line, indent: 0 };
+  }
+  return {
+    text: match[2],
+    indent: Math.min(5, match[1].length),
+  };
 }
 
 function parseFenceMarker(line: string): FenceMarker | null {

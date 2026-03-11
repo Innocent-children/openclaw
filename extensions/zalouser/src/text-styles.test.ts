@@ -62,6 +62,20 @@ describe("parseZalouserTextStyles", () => {
     });
   });
 
+  it("treats quoted backtick fences as literal code blocks", () => {
+    expect(parseZalouserTextStyles("> ```js\n> *cmd*\n> ```")).toEqual({
+      text: "*cmd*",
+      styles: [],
+    });
+  });
+
+  it("treats quoted tilde fences as literal code blocks", () => {
+    expect(parseZalouserTextStyles("> ~~~\n> *cmd*\n> ~~~")).toEqual({
+      text: "*cmd*",
+      styles: [],
+    });
+  });
+
   it("keeps unmatched fences literal", () => {
     expect(parseZalouserTextStyles("```python")).toEqual({
       text: "```python",
