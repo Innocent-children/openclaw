@@ -1,10 +1,8 @@
 import {
   LoginQRCallbackEventType as LoginQRCallbackEventTypeRuntime,
   Reactions as ReactionsRuntime,
-  TextStyle as TextStyleRuntime,
   ThreadType as ThreadTypeRuntime,
   Zalo as ZaloRuntime,
-  type Style as StyleType,
 } from "zca-js";
 
 export const ThreadType = ThreadTypeRuntime as {
@@ -30,23 +28,38 @@ export const Reactions = ReactionsRuntime as Record<string, string> & {
   NONE: string;
 };
 
-export const TextStyle = TextStyleRuntime as {
-  Bold: "b";
-  Italic: "i";
-  Underline: "u";
-  StrikeThrough: "s";
-  Red: "c_db342e";
-  Orange: "c_f27806";
-  Yellow: "c_f7b503";
-  Green: "c_15a85f";
-  Small: "f_13";
-  Big: "f_18";
-  UnorderedList: "lst_1";
-  OrderedList: "lst_2";
-  Indent: "ind_$";
-};
+// Mirror zca-js sendMessage style constants locally because the package root
+// typing surface does not consistently expose TextStyle/Style to tsgo.
+export const TextStyle = {
+  Bold: "b",
+  Italic: "i",
+  Underline: "u",
+  StrikeThrough: "s",
+  Red: "c_db342e",
+  Orange: "c_f27806",
+  Yellow: "c_f7b503",
+  Green: "c_15a85f",
+  Small: "f_13",
+  Big: "f_18",
+  UnorderedList: "lst_1",
+  OrderedList: "lst_2",
+  Indent: "ind_$",
+} as const;
 
-export type Style = StyleType;
+type TextStyleValue = (typeof TextStyle)[keyof typeof TextStyle];
+
+export type Style =
+  | {
+      start: number;
+      len: number;
+      st: Exclude<TextStyleValue, typeof TextStyle.Indent>;
+    }
+  | {
+      start: number;
+      len: number;
+      st: typeof TextStyle.Indent;
+      indentSize?: number;
+    };
 
 export type Credentials = {
   imei: string;
