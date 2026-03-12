@@ -1399,14 +1399,8 @@ function extractKimiCitations(data: KimiSearchResponse): string[] {
   return [...new Set(citations)];
 }
 
-function buildKimiToolResultContent(data: KimiSearchResponse): string {
-  return JSON.stringify({
-    search_results: (data.search_results ?? []).map((entry) => ({
-      title: entry.title ?? "",
-      url: entry.url ?? "",
-      content: entry.content ?? "",
-    })),
-  });
+function buildKimiToolResultContent(args: Record<string, unknown>): string {
+  return JSON.stringify(args);
 }
 
 async function runKimiSearch(params: {
@@ -1476,27 +1470,38 @@ async function runKimiSearch(params: {
           tool_calls: toolCalls,
         });
 
-        const toolContent = buildKimiToolResultContent(data);
-        let pushedToolResult = false;
-        for (const toolCall of toolCalls) {
-          const toolCallId = toolCall.id?.trim();
-          if (!toolCallId) {
-            continue;
+          let pushedToolResult = false;
+          for (const toolCall of toolCalls) {
+            const toolCallId = toolCall.id?.trim();
+            if (!toolCallId) {
+              continue;
+            }
+
+            // Parse the tool call arguments to get search results
+            let toolArgs: Record<string, unknown> = {};
+            try {
+              toolArgs = JSON.parse(toolCall.function?.arguments ?? "{}") as Record<string, unknown>;
+            } catch {
+              // If parsing fails, use empty object
+            }
+
+            // Build tool result content from the tool call arguments
+            const toolContent = buildKimiToolResultContent(toolArgs);
+
+            pushedToolResult = true;
+            messages.push({
+              role: "tool",
+              tool_call_id: toolCallId,
+              content: toolContent,
+            });
           }
-          pushedToolResult = true;
-          messages.push({
-            role: "tool",
-            tool_call_id: toolCallId,
-            content: toolContent,
-          });
-        }
 
-        if (!pushedToolResult) {
-          return { done: true, content: text ?? "No response", citations: [...collectedCitations] };
-        }
+          if (!pushedToolResult) {
+            return { done: true, content: text ?? "No response", citations: [...collectedCitations] };
+          }
 
-        return { done: false };
-      },
+          return { done: false };
+        },
     );
 
     if (nextResult.done) {
