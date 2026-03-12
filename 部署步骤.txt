@@ -1,0 +1,5 @@
+git clone https://github.com/openclaw/openclaw.git
+pnpm install
+pnpm ui:build
+pnpm build
+npm install -g .
