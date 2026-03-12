@@ -140,10 +140,12 @@ async function executeModel(
 ): Promise<SlashCommandResult> {
   if (!args) {
     try {
-      const sessions = await client.request<SessionsListResult>("sessions.list", {});
-      const session = sessions?.sessions?.find((s: GatewaySessionRow) => s.key === sessionKey);
+      const [sessions, models] = await Promise.all([
+        client.request<SessionsListResult>("sessions.list", {}),
+        client.request<{ models: ModelCatalogEntry[] }>("models.list", {}),
+      ]);
+      const session = resolveCurrentSession(sessions, sessionKey);
       const model = session?.model || sessions?.defaults?.model || "default";
-      const models = await client.request<{ models: ModelCatalogEntry[] }>("models.list", {});
       const available = models?.models?.map((m: ModelCatalogEntry) => m.id) ?? [];
       const lines = [`**Current model:** \`${model}\``];
       if (available.length > 0) {
@@ -255,7 +257,7 @@ async function executeUsage(
 ): Promise<SlashCommandResult> {
   try {
     const sessions = await client.request<SessionsListResult>("sessions.list", {});
-    const session = sessions?.sessions?.find((s: GatewaySessionRow) => s.key === sessionKey);
+    const session = resolveCurrentSession(sessions, sessionKey);
     if (!session) {
       return { content: "No active session." };
     }
@@ -482,6 +484,13 @@ async function loadCurrentSession(
   sessionKey: string,
 ): Promise<GatewaySessionRow | undefined> {
   const sessions = await client.request<SessionsListResult>("sessions.list", {});
+  return resolveCurrentSession(sessions, sessionKey);
+}
+
+function resolveCurrentSession(
+  sessions: SessionsListResult | undefined,
+  sessionKey: string,
+): GatewaySessionRow | undefined {
   const normalizedSessionKey = normalizeSessionKey(sessionKey);
   const currentAgentId =
     parseAgentSessionKey(normalizedSessionKey ?? "")?.agentId ??
@@ -500,18 +509,8 @@ async function loadThinkingCommandState(client: GatewayBrowserClient, sessionKey
     client.request<SessionsListResult>("sessions.list", {}),
     client.request<{ models: ModelCatalogEntry[] }>("models.list", {}),
   ]);
-  const normalizedSessionKey = normalizeSessionKey(sessionKey);
-  const currentAgentId =
-    parseAgentSessionKey(normalizedSessionKey ?? "")?.agentId ??
-    (normalizedSessionKey === DEFAULT_MAIN_KEY ? DEFAULT_AGENT_ID : undefined);
-  const aliases = normalizedSessionKey
-    ? resolveEquivalentSessionKeys(normalizedSessionKey, currentAgentId)
-    : new Set<string>();
   return {
-    session: sessions?.sessions?.find((session: GatewaySessionRow) => {
-      const key = normalizeSessionKey(session.key);
-      return key ? aliases.has(key) : false;
-    }),
+    session: resolveCurrentSession(sessions, sessionKey),
     models: models?.models ?? [],
   };
 }
