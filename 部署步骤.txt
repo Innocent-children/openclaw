@@ -3,3 +3,4 @@ pnpm install
 pnpm ui:build
 pnpm build
 npm install -g .
+openclaw onboard --install-daemon
