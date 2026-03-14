@@ -1,0 +1,15 @@
+新部署：
+git clone https://github.com/innocent-children/openclaw.git
+pnpm install
+pnpm ui:build
+pnpm build
+pnpm link --global
+openclaw onboard --install-daemon
+
+
+更新：
+git checkout xxx
+pnpm install
+pnpm ui:build
+pnpm build
+openclaw update
