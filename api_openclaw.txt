@@ -1,0 +1,195 @@
+Knowledge Bridge — OpenClaw 对接 API
+=====================================
+
+Base URL: http://127.0.0.1:8111
+
+两个接口都需要 HMAC 签名。
+
+
+HMAC 签名
+---------
+
+每个请求必须携带三个请求头：
+
+  X-KB-RequestId    请求唯一标识（与 body 中的 requestId 一致）
+  X-KB-Timestamp    Unix 毫秒时间戳
+  X-KB-Signature    签名值
+
+签名计算：
+  1. bodyHash = SHA-256(requestBody) → 十六进制小写字符串
+  2. signatureContent = requestId + timestamp + bodyHash（字符串直接拼接，无分隔符）
+  3. signature = Base64(HMAC-SHA256(signatureContent, sharedSecret))
+
+时间戳容差：5 分钟（300000ms），超出拒绝请求。
+共享密钥：两端配置相同的 KB_SHARED_SECRET。
+
+
+========================================================================
+1. 查询知识证据包
+========================================================================
+
+POST /api/v1/query
+
+用途：用户提问时，OpenClaw 调用此接口获取知识证据包，将 sources 和 instructions
+     注入 LLM 上下文生成最终回答。
+
+请求体：
+{
+  "requestId": "uuid-string",          // 必填，请求唯一标识（用于幂等和签名）
+  "userId": "user-001",                // 必填，用户 ID
+  "chatId": "chat-001",               // 可选，群聊 ID
+  "sessionKey": "session-key",         // 可选，会话标识
+  "messageId": "msg-001",             // 可选，消息 ID
+  "question": "如何部署 sing-box？",    // 必填，用户问题
+  "channelType": "feishu",            // 可选，渠道类型
+  "isGroup": false,                    // 是否群聊
+  "flags": {                           // 可选
+    "strictKbOnly": false,             // true → 强制 KB_ONLY 模式
+    "needCitation": false              // 是否需要引用来源
+  }
+}
+
+响应体：
+{
+  "requestId": "uuid-string",
+  "route": "KB_PLUS_LLM",             // KB_ONLY | KB_PLUS_LLM | LLM_ONLY
+  "allowModelSupplement": true,        // OpenClaw 的 LLM 是否可以补充回答
+  "sources": [                         // 知识证据列表（按 score 降序，已截断）
+    {
+      "dataset": "kb_qa",
+      "title": "sing-box 部署 FAQ",
+      "content": "...",
+      "score": 0.92,
+      "metadata": {
+        "topic": "sing-box",
+        "reviewStatus": "APPROVED"
+      }
+    }
+  ],
+  "instructions": [                    // 注入 LLM system/developer prompt 的约束指令
+    "优先依据sources回答",
+    "不要编造未在sources中出现的事实",
+    "如sources不足可补充但需标注"
+  ],
+  "retrievalQuality": {
+    "hitCount": 3,                     // 返回证据条数
+    "confidence": "HIGH",              // HIGH(>=0.8) | MEDIUM(>=0.6) | LOW(<0.6)
+    "truncated": false,                // 是否发生截断
+    "originalHitCount": 3              // 截断前命中数
+  }
+}
+
+OpenClaw 使用方式：
+  - 将 sources 拼入 LLM 上下文作为知识来源
+  - 将 instructions 注入 system/developer prompt 作为回答约束
+  - 根据 route 决定回答模式：
+      KB_ONLY       → LLM 只能依据 sources 回答，不足时说明知识库无相关信息
+      KB_PLUS_LLM   → LLM 优先依据 sources，可补充但需标注
+      LLM_ONLY      → sources 为空，LLM 自由回答
+  - allowModelSupplement=false 时禁止 LLM 补充自身知识
+
+
+========================================================================
+2. 自动候选评估
+========================================================================
+
+POST /api/v1/ingest/candidate
+
+用途：OpenClaw 转发用户消息时调用，由 Knowledge Bridge 判定内容是否值得沉淀。
+     判定通过后自动创建入库任务并异步处理（LLM 知识化重写 → MinIO 存储）。
+
+请求体：
+{
+  "requestId": "uuid-string",          // 必填
+  "userId": "user-001",                // 必填
+  "chatId": "chat-001",               // 可选
+  "messageIds": ["msg-001"],           // 可选，关联的消息 ID 列表
+  "content": "消息内容...",             // 必填，消息文本
+  "sourceType": "FEISHU_CHAT",        // 必填，来源类型
+  "attachments": [                     // 可选
+    {
+      "name": "file.pdf",
+      "url": "https://...",
+      "mimeType": "application/pdf"
+    }
+  ]
+}
+
+sourceType 可选值：
+  FEISHU_CHAT   飞书单轮问答
+  MARKDOWN      Markdown 文档
+  TUTORIAL      教程
+  NOTE          笔记
+  ATTACHMENT    附件
+
+响应体：
+{
+  "requestId": "uuid-string",
+  "worthy": true,                      // 是否值得沉淀
+  "reason": "内容值得沉淀，已创建候选任务", // 判定原因
+  "taskId": 42,                        // worthy=true 时返回入库任务 ID
+  "duplicate": false                   // 是否内容重复
+}
+
+判定规则（按顺序）：
+  1. 内容长度 < 50 字符 → worthy=false，"内容过短"
+  2. 闲聊内容（你好/谢谢/哈哈/好的/收到等） → worthy=false，"闲聊内容"
+  3. 无知识特征（无标题/列表/问答词/代码块/技术术语） → worthy=false，"未检测到知识特征"
+  4. 内容已存在（SHA-256 去重） → worthy=false，"内容已存在"
+  5. 全部通过 → worthy=true，自动创建入库任务
+
+OpenClaw 使用方式：
+  - 每条用户消息都可以调用此接口评估
+  - worthy=true 表示已自动入库，无需额外操作
+  - worthy=false 可忽略，不影响正常对话流程
+  - 入库任务初始审核状态为 CANDIDATE（候选待审核）
+
+
+========================================================================
+3. 手动入库
+========================================================================
+
+POST /api/v1/ingest/manual
+
+用途：用户显式要求入库时（如发送 #入库、/kb add），OpenClaw 调用此接口提交内容。
+     与自动候选评估的区别：手动入库跳过知识特征判定，直接创建入库任务并异步处理。
+     此接口不需要 HMAC 签名。
+
+请求体：
+{
+  "requestId": "uuid-string",          // 必填，请求唯一标识
+  "userId": "user-001",                // 必填，用户 ID
+  "chatId": "chat-001",               // 可选，群聊 ID
+  "messageIds": ["msg-001"],           // 可选，关联的消息 ID 列表
+  "content": "# 要入库的内容...",       // 必填，原始内容
+  "sourceType": "MARKDOWN",           // 必填，来源类型
+  "attachments": [                     // 可选
+    {
+      "name": "file.pdf",
+      "url": "https://...",
+      "mimeType": "application/pdf"
+    }
+  ],
+  "force": false                       // 可选，true 跳过内容去重检查
+}
+
+sourceType 可选值：
+  FEISHU_CHAT   飞书单轮问答        → 仅生成 Q&A
+  MARKDOWN      Markdown 文档       → 生成 Guide + Q&A
+  TUTORIAL      教程                → 生成 Guide + Q&A
+  NOTE          笔记                → 生成 Guide + Q&A
+  ATTACHMENT    附件                → 自动判断后委托
+
+响应体：
+{
+  "requestId": "uuid-string",
+  "taskId": 43,                        // 入库任务 ID
+  "status": "RECEIVED",                // 初始状态，后续异步处理
+  "duplicate": false                   // true 表示内容已存在（基于 SHA-256 去重）
+}
+
+OpenClaw 使用方式：
+  - 用户发送 #入库 或类似指令时调用
+  - 返回 taskId 后可告知用户"已提交入库"
+  - 入库为异步处理，可通过 GET /api/v1/ingest/status/{taskId} 查询进度（此接口也不需要 HMAC）
+  - duplicate=true 时可告知用户"内容已存在"，设置 force=true 可强制重新入库

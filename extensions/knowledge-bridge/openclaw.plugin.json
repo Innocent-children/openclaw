@@ -1,0 +1,49 @@
+{
+  "id": "knowledge-bridge",
+  "name": "Knowledge Bridge",
+  "description": "Queries the local Knowledge Bridge service and injects evidence into the next LLM turn.",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "baseUrl": {
+        "type": "string",
+        "format": "uri"
+      },
+      "sharedSecretRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["credentialKey"],
+        "properties": {
+          "credentialKey": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "minimum": 250,
+        "maximum": 120000
+      },
+      "strictKbOnlyDefault": {
+        "type": "boolean"
+      },
+      "needCitationDefault": {
+        "type": "boolean"
+      },
+      "perChannel": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
